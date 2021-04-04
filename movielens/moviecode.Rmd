@@ -1,0 +1,366 @@
+---
+title: "MovieLens"
+author: "Dana Saeed"
+date: "4 April 2021"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+## Introduction
+
+Recommendation systems plays an important role in e-commerce and online streaming services, such as Netflix, YouTube and Amazon. Making the right recommendation for the next product, music or movie increases user retention and satisfaction, leading to sales and profit growth. Companies competing for customer loyalty invest on systems that capture and analyses the user’s preferences, and offer products or services with higher likelihood of purchase.
+
+The economic impact of such company-customer relationship is clear: Amazon is the largest online retail company by sales and part of its success comes from the recommendation system and marketing based on user preferences. In 2006 Netflix offered a one million dollar prize2 for the person or group that could improve their recommendation system by at least 10%.
+
+Usually recommendation systems are based on a rating scale from 1 to 5 grades or stars, with 1 indicating lowest satisfaction and 5 is the highest satisfaction. Other indicators can also be used, such as comments posted on previously used items; video, music or link shared with friends; percentage of movie watched or music listened; web pages visited and time spent on each page; product category; and any other interaction with the company’s web site or application can be used as a predictor.
+
+## WorkFlow
+
+The main steps in a data science project include:
+
+Data preparation: download, parse, import and prepare the data to be processed and analysed.
+Data exploration and visualization: explore data to understand the features and the relationship between the features and predictors.
+Data cleaning: eventually the dataset contains unnecessary information that needs to be removed.
+Data analysis and modeling: create the model using the insights gained during exploration. Also test and validate the model.
+Communicate: create the report and publish the results.
+First we download the dataset from MovieLens website and split into two subsets used for training and validation. The training subset is called edx and the validation subset is called validation. The edx set is split again into two subsets used for training and and testing. When the model reaches the RMSE target in the testing set, we train the edx set with the model and use the validation set for final validation. We pretend the validation set is new data with unknown outcomes.
+
+In the next step we create charts, tables and statistics summary to understand how the features can impact the outcome. The information and insights obtained during exploration will help to build the machine learning model.
+
+Creating a recommendation system involves the identification of the most important features that helps to predict the rating any given user will give to any movie. We start building a very simple model, which is just the mean of the observed values. Then, the user and movie effects are included in the linear model, improving the RMSE. Finally, the user and movie effects receive regularization parameter that penalizes samples with few ratings.
+
+# Getting the data ready
+First the dataset is downloaded and the required libraries are fetched.
+```{r stepone,warning=FALSE,message=FALSE}
+
+if(!require(tidyverse)) 
+  install.packages("tidyverse", repos = "http://cran.us.r-project.org")
+if(!require(caret)) 
+  install.packages("caret", repos = "http://cran.us.r-project.org")
+if(!require(data.table)) 
+  install.packages("data.table", repos = "http://cran.us.r-project.org")
+
+# MovieLens 10M dataset:
+# https://grouplens.org/datasets/movielens/10m/
+# http://files.grouplens.org/datasets/movielens/ml-10m.zip
+
+dl <- tempfile()
+download.file("http://files.grouplens.org/datasets/movielens/ml-10m.zip", dl)
+
+ratings <- fread(text = gsub("::", "\t", 
+                             readLines(unzip(dl, "ml-10M100K/ratings.dat"))),
+                 col.names = c("userId", "movieId", "rating", "timestamp"))
+
+movies <- str_split_fixed(readLines(unzip(dl, "ml-10M100K/movies.dat")), "\\::", 3)
+colnames(movies) <- c("movieId", "title", "genres")
+movies <- as.data.frame(movies) %>% 
+  mutate(movieId = as.numeric(levels(movieId))[movieId],
+         title = as.character(title),
+         genres = as.character(genres))
+
+movielens <- left_join(ratings, movies, by = "movieId")
+
+# 'Validation' set will be 10% of MovieLens data
+set.seed(1, sample.kind="Rounding")
+test_index <- createDataPartition(y = movielens$rating, 
+                                  times = 1, p = 0.1, list = FALSE)
+edx <- movielens[-test_index,]
+temp <- movielens[test_index,]
+
+# Make sure userId and movieId in 'validation' set are also in 'edx' set
+validation <- temp %>% 
+  semi_join(edx, by = "movieId") %>%
+  semi_join(edx, by = "userId")
+
+# Add rows removed from 'validation' set back into 'edx' set
+removed <- anti_join(temp, validation)
+edx <- rbind(edx, removed)
+
+rm(dl, ratings, movies, test_index, temp, movielens, removed)
+
+set.seed(123, sample.kind="Rounding")
+test_index <- createDataPartition(y = edx$rating, times = 1, p = 0.1, list = FALSE)
+train_set <- edx[-test_index,]
+temp <- edx[test_index,]
+
+# Make sure userId and movieId in test set are also in train set
+test_set <- temp %>% 
+  semi_join(train_set, by = "movieId") %>%
+  semi_join(train_set, by = "userId")
+
+# Add rows removed from test set back into train set
+removed <- anti_join(temp, test_set)
+train_set <- rbind(train_set, removed)
+
+rm(test_index, temp, removed)
+
+```
+The edx set is used for training and testing, and the validation set is used for final validation to get the model prediction on  unseen data.
+Here, we split the edx set in 2 parts: 
+* the training set used to train the model (90 percent of total data)
+* the test set  use to test the model   (10 percent of the total data)
+* validation set , used to calculate the final RMSE.
+
+# Explorary Data Analysis
+
+We need to understand the dataset and get few insights from it before moving forward. The str() method is used to get the idea about the datatypes of the data and to see the few of the values. We also check the dimensions of data to get the row and col count
+```{r steptwo}
+head(edx)
+str(edx)
+dim(edx)
+
+```
+Next we get the top five movie genres in the dataset
+
+```{r topfivegenre}
+tp<- edx %>% group_by(genres) %>% 
+  summarise(n=n())
+head(tp)
+```
+We see the ratings the users have given to the movies
+```{r ratings}
+tp<- edx %>% group_by(rating) %>% summarize(n=n())
+head(tp)
+```
+Next the data is grouped by movie ID and we get the summary to see the distribution of the data and also see the boxplot of the data
+```{r plot}
+
+boxplot(edx$rating)
+```
+
+# Data Preparation
+
+We only select those features that would give us the best performance without over complexity of the model.
+
+```{r select}
+train_set <- train_set %>% select(userId, movieId, rating, title)
+test_set  <- test_set  %>% select(userId, movieId, rating, title)
+```
+# Models to predict
+
+The approach is to use different algorithms to make the predictions and calculate RMSE to get the best performing model, the best model is the one having the lowest error.
+
+# Predictions using Random probabilities
+We use monte Carlo simulation to estimate the probability 
+
+```{r random}
+
+set.seed(123, sample.kind = "Rounding")
+
+# Create the probability of each rating
+p <- function(x, y) mean(y == x)
+rating <- seq(0.5,5,0.5)
+
+# Estimate the probability of each rating with Monte Carlo simulation
+B <- 10^3
+M <- replicate(B, {
+  s <- sample(train_set$rating, 100, replace = TRUE)
+  sapply(rating, p, y= s)
+})
+prob <- sapply(1:nrow(M), function(x) mean(M[x,]))
+
+# Predict random ratings
+y_hat_random <- sample(rating, size = nrow(test_set), 
+                       replace = TRUE, prob = prob)
+
+
+mse <- function(yhat,y)
+{
+return(  mean((yhat - y)^2))
+}
+# Create a table with the error results
+pred <- tibble(Method = "Project Goal", RMSE = 0.8649, MSE = NA, MAE = NA)
+pred <- bind_rows(pred, 
+                    tibble(Method = "Monte Carlo Random prediction", 
+                           RMSE = caret::RMSE(test_set$rating,y_hat_random),
+                           MSE  = mse(test_set$rating, y_hat_random),
+                           MAE  = caret::MAE(test_set$rating,y_hat_random)))
+
+
+pred
+```
+#Linear Model for predictions
+```{r linear}
+
+# Mean of observed values
+mu <- mean(train_set$rating)
+
+# Update the error table  
+pred <- bind_rows(pred, 
+                    tibble(Method = "Mean model", 
+                           RMSE = caret::RMSE(test_set$rating, mu),
+                           MSE  = mse(test_set$rating, mu),
+                           MAE  = caret::MAE(test_set$rating, mu)))
+# Show the RMSE improvement  
+pred
+
+```
+
+After getting the predictions on the linear model, the next step is to include the effect of the movie on the linear model so the extension to the linear model can be defined from the code below
+
+```{r movieaffect}
+# Movie effects (bi)
+bi <- train_set %>% 
+  group_by(movieId) %>% 
+  summarize(b_i = mean(rating - mu))
+head(bi)
+
+
+#predict
+
+y_hat_bi <- mu + test_set %>% 
+  left_join(bi, by = "movieId") %>% 
+  .$b_i
+
+# Calculate the RMSE  
+pred <- bind_rows(pred, 
+                    tibble(Method = "Mean + bi", 
+                           RMSE = caret::RMSE(test_set$rating, y_hat_bi),
+                           MSE  = mse(test_set$rating, y_hat_bi),
+                           MAE  = caret::MAE(test_set$rating, y_hat_bi)))
+
+# Show the RMSE improvement  
+pred
+
+```
+In the step by step approach the model is now added with the user affect to see the RMSE of the model on the test set
+
+
+```{r adduser}
+
+# User effect (bu)
+bu <- train_set %>% 
+  left_join(bi, by = 'movieId') %>%
+  group_by(userId) %>%
+  summarize(b_u = mean(rating - mu - b_i))
+
+# Prediction
+y_hat_bi_bu <- test_set %>% 
+  left_join(bi, by='movieId') %>%
+  left_join(bu, by='userId') %>%
+  mutate(pred = mu + b_i + b_u) %>%
+  .$pred
+
+# Update the results table
+pred <- bind_rows(pred, 
+                    tibble(Method = "Mean + bi + bu", 
+                           RMSE = caret::RMSE(test_set$rating, y_hat_bi_bu),
+                           MSE  = mse(test_set$rating, y_hat_bi_bu),
+                           MAE  = caret::MAE(test_set$rating, y_hat_bi_bu)))
+
+# Show the RMSE improvement  
+pred
+
+```
+
+The RMSE improved from the initial estimation based on the mean. However, we still need to check if the model makes good ratings predictions.
+Check the 15 largest residual differences. We also look at the table for the
+top best and top worst movies.
+
+```{r predds}
+train_set %>% 
+  left_join(bi, by='movieId') %>%
+  mutate(residual = rating - (mu + b_i)) %>%
+  arrange(desc(abs(residual))) %>%  
+  slice(1:15)
+
+titles <- train_set %>% 
+  select(movieId, title) %>% 
+  distinct()
+
+bi %>% 
+  inner_join(titles, by = "movieId") %>% 
+  arrange(-b_i) %>% 
+  select(title) %>%
+  head()
+
+bi %>% 
+  inner_join(titles, by = "movieId") %>% 
+  arrange(b_i) %>% 
+  select(title) %>%
+  head() 
+```
+
+# Matrix Factorizations
+Matrix factorization approximates a large user-movie matrix into the product of two smaller dimension matrices. Information in the train set is stored in tidy format, with one observation per row, so it needs to be converted to the user-movie matrix before using matrix factorization. This code executes this transformation.
+
+```{r ecosystem}
+
+train_data <- train_set %>% 
+  select(userId, movieId, rating) %>% 
+  spread(movieId, rating) %>% 
+  as.matrix()
+
+if(!require(recosystem)) 
+  install.packages("recosystem", repos = "http://cran.us.r-project.org")
+set.seed(123, sample.kind = "Rounding") # This is a randomized algorithm
+
+# Convert the train and test sets into recosystem input format
+train_data <-  with(train_set, data_memory(user_index = userId, 
+                                           item_index = movieId, 
+                                           rating     = rating))
+test_data  <-  with(test_set,  data_memory(user_index = userId, 
+                                           item_index = movieId, 
+                                           rating     = rating))
+# Create the model object
+r <-  recosystem::Reco()
+# Select the best tuning parameters
+opts <- r$tune(train_data, opts = list( 
+                                       lrate = c(0.1, 0.2), 
+                                       costq_l2 = c(0.01, 0.1),
+                                       nthread  = 4, niter = 1))
+ # Train the algorithm  
+r$train(train_data, opts = c(opts$min, nthread = 4, niter = 1))
+
+y_hat_reco <-  r$predict(test_data, out_memory())
+head(y_hat_reco, 10)
+pred<- bind_rows(pred, 
+                    tibble(Method = "Matrix Factorization", 
+                           RMSE = caret::RMSE(test_set$rating, y_hat_reco),
+                           MSE  = mse(test_set$rating, y_hat_reco),
+                           MAE  = caret::MAE(test_set$rating, y_hat_reco)))
+pred
+```
+As we have seen from RMSE Matrix Factorization performed better than other models and we were supposed to do validation on the best model so in the next step we validate the model .
+#Validation on Matrix Factorization
+```{r validation}
+set.seed(1234, sample.kind = "Rounding")
+# Convert 'edx' and 'validation' sets to recosystem input format
+edx_reco <-  with(edx, data_memory(user_index = userId, 
+                                   item_index = movieId, 
+                                   rating = rating))
+validation_reco  <-  with(validation, data_memory(user_index = userId, 
+                                                  item_index = movieId, 
+                                                  rating = rating))
+# Create the model object
+r <-  recosystem::Reco()
+# Tune the parameters
+opts <-  r$tune(edx_reco, opts = list( 
+                                     lrate = c(0.1, 0.2),
+                                     
+                                     costq_l2 = c(0.01, 0.1),
+                                     nthread  = 4, niter = 1))
+# Train the model
+r$train(edx_reco, opts = c(opts$min, nthread = 4, niter = 1))
+
+# Calculate the prediction
+y_hat_final_reco <-  r$predict(validation_reco, out_memory())
+
+# Update the result table
+pred <- bind_rows(pred, 
+                    tibble(Method = "Final Matrix Factorization ", 
+                           RMSE = caret::RMSE(validation$rating, y_hat_final_reco),
+                           MSE  = mse(validation$rating, y_hat_final_reco),
+                           MAE  = caret::MAE(validation$rating, y_hat_final_reco)))
+
+
+```
+
+# Conclusion
+
+The first step was to start with the simple linear model and then adding more and complexity by adding the effects of the movies and the users. The RMSE was satisfying and reduced with the model complexity indicating that more and more complex model would have the better predictions so we decided to use Matrix Factorization to create the model and found out that it's performance was even better than others so as equired the hold out validation is performed on it and we produced some good results. The mean+bi model has the RMSE of 0.943 which is really good as it is closer to zero.
+
+
+

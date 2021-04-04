@@ -1,0 +1,344 @@
+---
+title: "Project One"
+author: "Dana Saeed"
+date: "2/26/2021"
+output: html_document
+---
+# Project Objective
+
+The purpose of this project is to build a risk analytics model to understand the renewal potential and claim propensity of Existing Customers under Personal Auto Insurance Lines.
+This data contains information about 127 variables which also includes the personal information of the driver, their age, profession, marital status, and other demographics. The data also includes the details related to the car like to model and make of the car, not only that it also contains details regarding the different type of coverages and their code. Some of the data is relevant to the model that we are building but a lot of it is of no use , because either it has weak or no correlation with the target variable or it does not add anything significant to the predictions like the name of the driver and their distance to work and their gender.
+We would use Logistic regression, Random Forest Classification and KNN to predict the target variable. We would also use the Ensemble techniques to fine tune our model and then select the best fit if the model without overfitting.
+
+#Assumptions
+There are a few assumptions considered:
+* The Sample size is adequate to perform techniques like logistic regression and Random Forest Classification.
+* All the necessary packages are installed in R
+* Working Directly is set to appropriate folder and file is in CSV format
+
+
+## Imprting required libraries
+```{r importlib}
+#first we check that if the required libraries are downladed or not
+if(!require("ggplot2"))
+{
+  install.packages("ggplot2",repos = "http://cran.us.r-project.org")
+  
+}
+if(!require("caTools"))
+{
+    install.packages("caTools",repos = "http://cran.us.r-project.org")
+}
+if(!require("tidyverse"))
+{
+    install.packages("tidyverse",repos = "http://cran.us.r-project.org")
+}
+if(!require("Hmisc"))
+{
+    install.packages("Hmisc",repos = "http://cran.us.r-project.org")
+}
+if(!require("gensvm"))
+{
+    install.packages("gensvm",repos = "http://cran.us.r-project.org")
+}
+if(!require("randomForest"))
+{
+    install.packages("randomForest",repos = "http://cran.us.r-project.org")
+}
+if(!require("glmnet"))
+{
+    install.packages("glmnet",repos = "http://cran.us.r-project.org")
+}
+if(!require("caret"))
+{
+    install.packages("caret",repos = "http://cran.us.r-project.org")
+}
+
+if(!require("pROC"))
+{
+    install.packages("pROC",repos = "http://cran.us.r-project.org")
+}
+if(!require("corrplot"))
+{
+    install.packages("corrplot",repos = "http://cran.us.r-project.org")
+}
+if(!require("ROCR"))
+{
+    install.packages("ROCR",repos = "http://cran.us.r-project.org")
+}
+
+if(!require("gbm"))
+{
+    install.packages("gbm",repos = "http://cran.us.r-project.org")
+}
+if(!require("readxl"))
+{
+    install.packages("readxl",repos = "http://cran.us.r-project.org")
+}
+#load the libraries
+options(warn=-1)
+library(ggplot2)
+library(caTools)
+library(tidyverse)
+library(Hmisc)
+library(gensvm)
+library(randomForest)
+library(glmnet)
+library(caret)
+library(pROC)
+library(corrplot)
+library(ROCR)
+library(gbm)
+#download the dataset
+#download.file("https://drive.google.com/u/0/uc?id=1mnjmZmXp_ej1G4k7rj-cKA7tGKqiB5cc&export=download","dataset.xlsx",quiet=TRUE)
+df <- readxl::read_excel('dataset.xlsx')
+df = df %>% distinct()
+df$ClaimStatus = factor(df$ClaimStatus, levels = c(0, 1)) #convert the target variable to the encoded values
+
+total_cells <- prod(dim(df)) #check total number of cells
+missing_vals <- sum(is.na(df)) #check the misisng values
+percent_of_missing_data <- (missing_vals/total_cells)*100 #check percenatge of missing vals
+colSums(is.na(df))
+describe(df) #checking basic stats of the data
+summary(df) #checking basic facts
+```
+
+Before moving forward few points need to be considered for the sake of data correction
+* The missing variables need to be handled.
+* The missing categorical variables are replaced by the frequency of the occurrence of that respected variables.
+* The variables who missing percentage is very high are dropped, because the keeping of them would perform our model performance negatively and the thought of imputing those variables were not considered because it would gravely alter the gist of the actual data.
+* The target variable is in “num” and needs to be converted as a factor so that the classification model can be trained.
+* The categorical variables need to be encoded so that the models can recognize them correctly.
+* Outliers exists in the datasets and needs to be treated.
+
+# Data Visulization
+
+* The 55% of people that made claim
+* The average driving age of a person in USA is 22 years old.
+* The 49% of people considered renewing their policy.
+* 29 % of the data in missing.
+* The age of the driver has nothing to do with the target variable claim status, they have very weak positive correlation.
+* Most of the people tend to pay their Premium 6 times a year, after every 2 months.
+* Male tend to have more claims than the women
+* The violation points do not help much in filing the claim
+* After performing Pearson correlation on to the datasets and by using the backward elimination techniques the unsignificant variables were removed and the dimensions of the data set was reduced to (14177,11).
+* Violation point have no or negative impact on the ClaimStatus.
+* If the distance to works increases, then the ClaimStatus decreases.
+* DP is the most common Type of auto insurance
+```{r step}
+
+#plot the scatterplot to see relationship with Premium and AGEofdriving in US
+ggplot(df) +
+  aes(x = Premium, y = AgeUSdriving_1) +
+  geom_point(colour = "#0c4c8a") +
+  theme_minimal()+ggtitle("AGE vs Premium ")
+#plotting the boxplots to see the outliers and the distributions
+boxplot(df$Total_Distance_To_Work)
+
+boxplot(df$Premium,bins=20)
+boxplot(df$AgeUSdriving_1,bins=20)
+#we plot the barplot of the ClaimStatus count and see the types, this would be a pie plot by keeping the coord_polar() arguments
+ggplot(df, aes(x="", y=ClaimStatus, fill=factor(Type))) +geom_bar(stat="identity", width=1) +coord_polar("y", start=0)
+#check the histogram the dustribution of the age
+ggplot(df,aes(AgeUSdriving_1)) + geom_histogram(fill='blue',bins=30,alpha=0.5)
+
+#next we plot the geom_bar to see the Type and their count
+ggplot(data = df) +geom_bar(mapping = aes(x = factor(Type)),fill="blue")+xlab("Factors")+ggtitle("Number of factors")
+#we see the barplots to see the count of CancellationType by the CoverageLiability of a customer
+ggplot(data = df) +geom_bar(mapping = aes(x = factor(CancellationType),fill=factor(CoverageLiability)))+xlab("Cancellation type")+labs(fill="Coverage Liability",title="Coverage Liabilty vs Cancellation Type")
+
+ggplot(df,aes(Premium)) + geom_histogram(fill='blue',bins=20,alpha=0.5)# Premium is not noramlized, we have to do it later
+ggplot(df,aes(x=ClaimFrequency,y=ClaimStatus))+geom_point()
+
+ggplot(data = df) +geom_bar(mapping = aes(x = factor(Type)),fill="red")
+
+```
+
+
+
+# Preprocessing
+As stated earlier the data has a lot of missing values which needs to be treated so that our model can be trained on the data and then the conclusion can be drawn from the data. The categorical variables are replaced by the mode of that variable. The numerical variables are replaced by their mean.
+The algorithms like random forest needs the input data to be in the numerical formats, so the categorical variables are converted to their equivalent numerical aliases using the Label Encoding. The data is also normalized by using Min Max Scaler.
+
+```{r prerocess}
+#this function is used to find the unique values and then compute the mode (the most occuring values in  adata and would be used to impute the missing values)
+getmode <- function(x) {
+  uniqv <- unique(x)
+  uniqv[which.max(tabulate(match(x, uniqv)))]
+}
+
+
+# Calculate the mode using the user function and then save the values inplace of missing values
+result.most.age <- getmode(df$AgeUSdriving_1) #Most common age in 28
+result.most.gender <- getmode(df$Sex_1) #Most of the drivers are male
+
+# Filling in the missing values
+df$Model_1[is.na(df$Model_1)] <-getmode(df$Model_1) 
+# df$Make_1[is.na(df$Make_1)] <-getmode(df$Make_1) 
+
+# df$CoverageLiability[is.na(df$CoverageLiability)] <-getmode(df$CoverageLiability) 
+
+df$CoverageMP[is.na(df$CoverageMP)] <-getmode(df$CoverageMP) 
+df$CoveragePD_1[is.na(df$CoveragePD_1)] <-getmode(df$CoveragePD_1) 
+df$CoveragePIP_CDW[is.na(df$CoveragePIP_CDW)] <-getmode(df$CoveragePIP_CDW)
+df$CoverageUMBI[is.na(df$CoverageUMBI)] <-getmode(df$CoverageUMBI)
+df$CoverageUMPD[is.na(df$CoverageUMPD)] <-getmode(df$CoverageUMPD) 
+
+
+#only 
+
+p <- ggplot(df, aes(ClaimStatus, ClaimFrequency))
+p + geom_point(aes(colour=factor(CoverageMP)))
+
+
+#convert the values to factors so that we can have classes
+#the logic is to first get the unqiue values and convert to list
+#Next is to take the one elemet less than the length because the encoded values
+#are starting from zero 
+#in the factor argument the labels represnts the labels required
+
+list.of.make.1 <- as.list(unique(df$Type))
+length.of.make1 <- (length(list.of.make.1)-1)
+df$Type<- factor(df$Type,levels = list.of.make.1,labels =c(0:8))
+
+# 
+list.of.make.1 <- as.list(unique(df$CoverageLiability))
+length.of.make1 <- (length(list.of.make.1)-1)
+df$CoverageLiability <- factor(df$CoverageLiability,levels = list.of.make.1,labels =c(0:3))
+
+list.of.make.1 <- as.list(unique(df$Model_1))
+length.of.make1 <- (length(list.of.make.1)-1)
+df$Model_1 <- factor(df$Model_1,levels = list.of.make.1,labels =c(0:1447)) #ONEHOT
+# 
+list.of.make.1 <- as.list(unique(df$CoverageMP))
+length.of.make1 <- (length(list.of.make.1)-1)
+df$CoverageMP <- factor(df$CoverageMP,levels = list.of.make.1,labels = c(1:2))
+
+# 
+
+# 
+list.of.make.1 <- as.list(unique(df$CoveragePD_1))
+length.of.make1 <- (length(list.of.make.1)-1)
+df$CoveragePD_1 <- factor(df$CoveragePD_1 ,levels = list.of.make.1,labels = c(1:3))
+# 
+list.of.make.1 <- as.list(unique(df$CoveragePIP_CDW))
+length.of.make1 <- (length(list.of.make.1)-1)
+df$CoveragePIP_CDW <- factor(df$CoveragePIP_CDW ,levels = list.of.make.1,labels = c(1:3))
+# 
+
+# 
+
+# 
+
+#here we replace the continous values by the MinMaxScaler so that every value is on the same scale
+
+df$Premium <- (df$Premium-min(df$Premium))/(max(df$Premium) - min(df$Premium))
+df$ClaimFrequency <- (df$ClaimFrequency-min(df$ClaimFrequency))/(max(df$ClaimFrequency) - min(df$ClaimFrequency))
+df$VehicleInspected_1 <- (df$VehicleInspected_1-min(df$VehicleInspected_1))/(max(df$VehicleInspected_1) - min(df$VehicleInspected_1))
+df$Units <- (df$Units-min(df$Units))/(max(df$Units) - min(df$Units))
+df$Billing_Term <- (df$Billing_Term-min(df$Billing_Term))/(max(df$Billing_Term) - min(df$Billing_Term))
+df$Renewed <- (df$Renewed-min(df$Renewed))/(max(df$Renewed) - min(df$Renewed))
+df$Amendment <- (df$Amendment-min(df$Amendment))/(max(df$Amendment) - min(df$Amendment))
+
+df$VehicleInspected_1 <-(df$VehicleInspected_1-min(df$VehicleInspected_1))/(max(df$VehicleInspected_1) - min(df$VehicleInspected_1))
+
+
+
+
+
+
+#We can see that only few attributes have larger affect on the claimstatus,
+#So we have to drop those irreveleant columns
+# 88:89,91:119,120,123,1
+```
+
+
+# Preparing the data for model training
+
+The dataset is divided into two set one for training the model and the other for predicting the performance of the model. 75% of the data is used for training and the rest of the data is use for testing. The data is shuffled so that each a mix of the data can be the part of the training and predictions.
+
+```{r select}
+#drop irrelevant features
+df <- subset(df,select = -c(1,3,7:11,12,13:17,20,23,24,25:52,53,54:62,63,64:68,69,70:73,74,75,76,77,80:119,120:123,124,125,127))
+#see the correlation plot of only of the numerical vals
+only_num <- sapply(df, is.numeric)
+corrplot(cor(df[,only_num]),method = 'circle')
+
+
+M <- as.data.frame(cor(df[,only_num]))
+table(df$ClaimStatus)
+sum(df$ClaimStatus ==1 )/nrow(df)
+
+#split data into train and test
+#TRAIN TEST SPLIT
+a=gensvm.train.test.split(x=df, train.size = 0.95,
+                           shuffle = T,
+                          return.idx = FALSE,random.state = 101)
+
+
+
+
+
+```
+
+#LOGISTIC REGRESSION
+Logistic regression is used as the first model to train the classification the model. Binomial family was used in training.
+```{r logregression}
+#we want to predict the ClaimStatus so we write the formula s given below and then predict on test set
+log.model <- glm(formula=ClaimStatus ~ . ,data = a$x.train,family=binomial)
+summary(log.model)
+prob_pred <- predict(log.model, type = 'response', newdata = a$x.test)
+
+#convert probabilties to classes
+fitted.results <- ifelse(prob_pred > 0.5,1,0)
+#see the confusion matrix to get the performance of the model
+confusionMatrix(as.factor(fitted.results),as.factor(a$x.test$ClaimStatus))
+
+#see the ROC values and plot the ROC curve
+
+roc(a$x.train$ClaimStatus, log.model$fitted.values, plot=TRUE,legacy.axes=TRUE,print.thres=T,print.auc=T)
+par(pty = "s")
+
+#this code is used to plot the values the TP,FP,TN,FN values are given as matrirx and the other arguments are for setting the graph look and feel
+ctable <- as.table(matrix(c(355, 174, 8, 7), nrow = 2, byrow = TRUE))
+fourfoldplot(ctable, color = c("#CC6666", "#99CC99"),
+             conf.level = 0, margin = 1, main = "Logistic Regression Confusion Matrix")
+```
+
+#RANDOMFOREST
+The second algorithm we used is Random forest, 100 trees were generated to make train the model
+```{r randomforest}
+#get the randomforest fit on the data 
+forest.model <- randomForest(x = a$x.train[-1],
+                             y = a$x.train$ClaimStatus,
+                             ntree = 100)
+#predict on test set
+y_pred.forest = predict(forest.model, newdata = a$x.test)
+y_pred.forest.prob = predict(forest.model, newdata = a$x.test,type='prob')
+
+#plot the roc curve
+roc(a$x.train$ClaimStatus,forest.model$votes[,2] , plot=TRUE,legacy.axes=TRUE,print.thres=T,print.auc=T)
+
+
+par(pty = "s")
+
+confusionMatrix(as.factor(a$x.test$ClaimStatus),as.factor(y_pred.forest))
+
+confusionMatrix(as.factor(y_pred.forest),as.factor(a$x.test$ClaimStatus))
+
+ctable <- as.table(matrix(c(3350, 169, 13, 13), nrow = 2, byrow = TRUE))
+fourfoldplot(ctable, color = c("#CC6666", "#99CC99"),
+             conf.level = 0, margin = 1, main = "Random Forest Confusion Matrix")
+
+```
+
+# Actionable Insight and recommendations
+* It is more likely the people who have a good premium and DP policy are more likely to male the claims so that company must focus on those customers.
+car related reimbursement in company .
+* Model Performance values for Train and test are within the maximum tolerance deviation of +/- 10%. Hence, the all models are not over-fitting.
+* Company should introduce more features in data for better analysis and also suggest furthercoverage plans to get better understanding of the customer needs, pooling suggestions to focus group. It would increase the focus group volume.
+
+* Company should keep track of the any amendment in the law because it may cause the working to get changed completely.
+* Company should keep the vehicles inspected to reduce the Claims.
+
+
