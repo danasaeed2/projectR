@@ -249,3 +249,4 @@ confusionMatrix(as.factor(y_pred.forest),as.factor(a$x.test$ClaimStatus))
 ctable <- as.table(matrix(c(3350, 169, 13, 13), nrow = 2, byrow = TRUE))
 fourfoldplot(ctable, color = c("#CC6666", "#99CC99"),
              conf.level = 0, margin = 1, main = "Random Forest Confusion Matrix")
+
